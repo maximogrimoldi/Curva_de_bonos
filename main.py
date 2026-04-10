@@ -2,40 +2,103 @@ import argparse
 import sys
 from datetime import date
 from pathlib import Path
-
-import pandas as pd
+from typing import Callable, Dict
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src import NSSCurve, SpreadEngine, Visualizer, data_loader
+from src.bond import Bond
 
-# ── Configuración ─────────────────────────────────────────────────────────────
+# ── Parámetro principal ───────────────────────────────────────────────────────
+# Opciones: "USD" | "CER" | "DL"
+CURVE = "USD"
+
+# ── Configuración general ─────────────────────────────────────────────────────
 SETTLEMENT_DATE = date(2026, 4, 10)
+N_RESTARTS      = 25
+CHART_STYLE     = "dark"
 
-MARKET_PRICES = {
-    "GD29": 71.50,
-    "GD30": 68.00,
-    "GD35": 62.00,
-    "GD38": 60.00,
-    "GD41": 58.50,
-    "GD46": 56.00,
+# ── Precios de mercado por tipo de curva ──────────────────────────────────────
+
+# Globales USD — precio como % de face value nominal
+# Curva implícita ~18% corto plazo → ~8% largo plazo
+MARKET_PRICES_USD = {
+    "GD29": 81.54,
+    "GD30": 87.59,
+    "GD35": 67.34,
+    "GD38": 63.59,
+    "GD41": 59.01,
+    "GD46": 50.39,
 }
 
-N_RESTARTS = 25
-CHART_STYLE = "dark"
+# BONCER — precio como % del valor técnico (capital ajustado por CER); tasa = real ARS
+# Curva implícita ~10% corto plazo → ~4% largo plazo (tasa real)
+MARKET_PRICES_CER = {
+    "TX26": 96.65,
+    "TX28": 90.57,
+    "TX30": 88.79,
+    "DICP": 90.33,
+    "PARP": 80.79,
+}
+
+# Dollar Linked — precio como % del valor técnico (capital ajustado por TC oficial)
+# Curva implícita ~8% corto plazo → ~3% largo plazo
+MARKET_PRICES_DL = {
+    "TV26D": 96.61,
+    "TV27":  92.30,
+    "TV28":  90.56,
+    "TV30":  88.72,
+}
+
+# ── Registro de curvas ────────────────────────────────────────────────────────
+# Cada entrada: (bonds_loader, market_prices, ons_loader, viz_title, save_prefix)
+CURVE_REGISTRY = {
+    "USD": (
+        data_loader.load_globales,
+        MARKET_PRICES_USD,
+        data_loader.load_sample_ons,
+        f"Curva Soberana Argentina · Globales USD · {SETTLEMENT_DATE.strftime('%d/%m/%Y')}",
+        "dashboard_usd",
+    ),
+    "CER": (
+        data_loader.load_boncer,
+        MARKET_PRICES_CER,
+        data_loader.load_sample_ons_cer,
+        f"Curva Soberana Argentina · CER (Tasa Real ARS) · {SETTLEMENT_DATE.strftime('%d/%m/%Y')}",
+        "dashboard_cer",
+    ),
+    "DL": (
+        data_loader.load_dollar_linked,
+        MARKET_PRICES_DL,
+        data_loader.load_sample_ons_dollar_linked,
+        f"Curva Soberana Argentina · Dollar Linked · {SETTLEMENT_DATE.strftime('%d/%m/%Y')}",
+        "dashboard_dl",
+    ),
+}
 
 
-def main(save_charts: bool = False) -> None:
-    print(f"\n  Settlement: {SETTLEMENT_DATE.strftime('%d/%m/%Y')} | Bonos: {list(MARKET_PRICES.keys())}\n")
+def _run_curve_section(
+    section_name: str,
+    bonds_dict: Dict[str, Bond],
+    market_prices: Dict[str, float],
+    ons_loader: Callable,
+    settlement: date,
+    viz_title: str,
+    save_prefix: str,
+    save_charts: bool,
+) -> None:
+    print(f"\n{'='*65}")
+    print(f"  {section_name}")
+    print(f"  Settlement: {settlement.strftime('%d/%m/%Y')} | Bonos: {list(market_prices.keys())}")
+    print(f"{'='*65}")
 
-    # 1. Cargar Globales y generar flujos
-    globales_dict = data_loader.load_globales(settlement=SETTLEMENT_DATE)
+    # 1. Generar flujos
     bonds, prices = [], []
-    for ticker, price in MARKET_PRICES.items():
-        if ticker not in globales_dict:
+    for ticker, price in market_prices.items():
+        if ticker not in bonds_dict:
             print(f"  WARN: {ticker} no encontrado. Omitiendo.")
             continue
-        bond = globales_dict[ticker]
+        bond = bonds_dict[ticker]
         bond.generate_cash_flow_schedule()
         bonds.append(bond)
         prices.append(price)
@@ -44,8 +107,8 @@ def main(save_charts: bool = False) -> None:
     nss = NSSCurve()
     nss.fit(bonds=bonds, market_prices=prices, n_restarts=N_RESTARTS, verbose=True)
 
-    # 3. Tasas spot en nodos clave
-    print("  Curva Spot NSS:")
+    # 3. Tabla spot / forward en nodos clave
+    print(f"\n  Curva Spot NSS — {section_name}:")
     nodos = [0.5, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30]
     print(f"  {'t(años)':>8} {'Spot (%)':>10} {'Forward 1Y (%)':>15}")
     print("  " + "-" * 36)
@@ -55,36 +118,59 @@ def main(save_charts: bool = False) -> None:
         print(f"  {t:>8.1f} {s:>10.4f} {f:>15.4f}")
 
     # 4. Z-Spreads de ONs
-    print("\n  Z-Spreads de ONs corporativas:")
+    print(f"\n  Z-Spreads de ONs — {section_name}:")
     engine = SpreadEngine(nss)
-    on_data = data_loader.load_sample_ons(settlement=SETTLEMENT_DATE)
-    on_bonds  = [v[0] for v in on_data.values()]
-    on_prices = [v[1] for v in on_data.values()]
+    ons_data  = ons_loader(settlement=settlement)
+    on_bonds  = [v[0] for v in ons_data.values()]
+    on_prices = [v[1] for v in ons_data.values()]
 
     on_results = []
     for bond, price in zip(on_bonds, on_prices):
-        res = engine.z_spread(bond, price)
-        on_results.append(res)
+        on_results.append(engine.z_spread(bond, price))
 
     df_spreads = engine.spread_table(on_bonds, on_prices)
     print(df_spreads.to_string(index=False))
 
-    # 5. Gráfico
+    # 5. Dashboard
     viz = Visualizer(style=CHART_STYLE)
-    save_path = "dashboard_curva_soberana.png" if save_charts else None
+    save_path = f"{save_prefix}.png" if save_charts else None
     viz.plot_dashboard(
         nss_curve=nss,
         on_results=on_results,
-        title=f"Curva Soberana Argentina · Globales USD · {SETTLEMENT_DATE.strftime('%d/%m/%Y')}",
+        title=viz_title,
         save_path=save_path,
     )
 
+
+def main(curve: str = CURVE, save_charts: bool = False) -> None:
     import matplotlib.pyplot as plt
+
+    curve = curve.upper()
+    if curve not in CURVE_REGISTRY:
+        raise ValueError(f"CURVE inválido: '{curve}'. Opciones: {list(CURVE_REGISTRY.keys())}")
+
+    bonds_loader, market_prices, ons_loader, viz_title, save_prefix = CURVE_REGISTRY[curve]
+
+    _run_curve_section(
+        section_name=f"CURVA SOBERANA — {curve}",
+        bonds_dict=bonds_loader(settlement=SETTLEMENT_DATE),
+        market_prices=market_prices,
+        ons_loader=ons_loader,
+        settlement=SETTLEMENT_DATE,
+        viz_title=viz_title,
+        save_prefix=save_prefix,
+        save_charts=save_charts,
+    )
+
     plt.show()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--curve", default=CURVE, choices=["USD", "CER", "DL"],
+        help="Tipo de curva a correr: USD | CER | DL  (default: %(default)s)",
+    )
     parser.add_argument("--save", action="store_true", help="Guardar gráfico como PNG.")
     args = parser.parse_args()
-    main(save_charts=args.save)
+    main(curve=args.curve, save_charts=args.save)
