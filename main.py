@@ -23,32 +23,37 @@ CHART_STYLE     = "dark"
 
 # Globales USD — precio como % de face value nominal
 # Curva implícita ~18% corto plazo → ~8% largo plazo
+# Precios calculados con NSS(β₀=0.08, β₁=0.10, β₂=-0.03, β₃=0.01, τ₁=2.0, τ₂=6.0)
+# Reemplazar con precios reales de mercado para uso en producción.
 MARKET_PRICES_USD = {
-    "GD29": 81.54,
-    "GD30": 87.59,
-    "GD35": 67.34,
-    "GD38": 63.59,
-    "GD41": 59.01,
-    "GD46": 50.39,
+    "GD29": 57.73,
+    "GD30": 59.27,
+    "GD35": 74.20,
+    "GD38": 76.05,
+    "GD41": 73.62,
+    "GD46": 72.66,
 }
 
-# BONCER — precio como % del valor técnico (capital ajustado por CER); tasa = real ARS
+# BONCER — precio como % de face value original (capital ajustado por CER); tasa = real ARS
 # Curva implícita ~10% corto plazo → ~4% largo plazo (tasa real)
+# Precios calculados con NSS(β₀=0.04, β₁=0.06, β₂=-0.02, β₃=0.01, τ₁=1.5, τ₂=5.0)
+# Reemplazar con precios reales de mercado para uso en producción.
 MARKET_PRICES_CER = {
-    "TX26": 96.65,
-    "TX28": 90.57,
+    "TX26": 39.49,
+    "TX28": 57.05,
     "TX30": 88.79,
-    "DICP": 90.33,
-    "PARP": 80.79,
+    "DICP": 81.74,
+    "PARP": 72.79,
 }
 
-# Dollar Linked — precio como % del valor técnico (capital ajustado por TC oficial)
+# Dollar Linked — precio como % de face value original (capital ajustado por TC oficial)
 # Curva implícita ~8% corto plazo → ~3% largo plazo
+# Precios calculados con NSS(β₀=0.03, β₁=0.05, β₂=-0.01, β₃=0.005, τ₁=1.5, τ₂=5.0)
+# Reemplazar con precios reales de mercado para uso en producción.
 MARKET_PRICES_DL = {
-    "TV26D": 96.61,
-    "TV27":  92.30,
-    "TV28":  90.56,
-    "TV30":  88.72,
+    "TV27":  92.15,
+    "TV28":  90.14,
+    "TV30":  85.20,
 }
 
 # ── Registro de curvas ────────────────────────────────────────────────────────

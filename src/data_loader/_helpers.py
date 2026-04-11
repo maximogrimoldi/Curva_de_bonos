@@ -34,3 +34,18 @@ def _jun_dec_dates(start_year: int, end_year: int) -> list:
         dates.append(date(y, 6, 30))
         dates.append(date(y, 12, 31))
     return sorted(dates)
+
+
+def _quarterly_dates(start_year: int, start_month: int, end_year: int, end_month: int) -> list:
+    """Fechas de pago trimestrales (último día hábil del mes, aproximado al 30)."""
+    import calendar
+    dates = []
+    year, month = start_year, start_month
+    while (year, month) <= (end_year, end_month):
+        last_day = min(30, calendar.monthrange(year, month)[1])
+        dates.append(date(year, month, last_day))
+        month += 3
+        if month > 12:
+            month -= 12
+            year += 1
+    return dates

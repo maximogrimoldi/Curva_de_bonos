@@ -9,10 +9,14 @@ import pandas as pd
 
 class Bond:
     """
-    Bono con soporte para sinking fund y cupones step-up.
+    Bono con soporte para sinking fund, step-up coupon, day count e indexación CER.
 
-    El cupón se calcula sobre el outstanding ANTES de la amortización
-    de ese período (convención de mercado).
+    Convenciones:
+    - El cupón se calcula sobre el outstanding ANTES de la amortización del período.
+    - day_count: "30/360" (USD Globales, ONs USD/DL) | "Actual/Actual" (CER/UVA).
+    - base_cer: índice CER de emisión (para indexar flujos reales a nominales, opcional).
+    - Precios de mercado en Argentina son DIRTY (sucio). accrued_interest() devuelve el AI
+      para obtener el precio limpio: precio_limpio = precio_sucio - accrued_interest().
     """
 
     def __init__(
@@ -24,12 +28,16 @@ class Bond:
         coupon_schedule: pd.DataFrame,
         frequency: int = 2,
         currency: str = "USD",
+        day_count: str = "30/360",
+        base_cer: float = 1.0,
     ) -> None:
         self.ticker = ticker
         self.face_value = float(face_value)
         self.settlement_date = settlement_date
         self.frequency = frequency
         self.currency = currency
+        self.day_count = day_count
+        self.base_cer = base_cer
 
         self.amortization_schedule = self._parse_amort(amortization_schedule)
         self.coupon_schedule = self._parse_coupon(coupon_schedule)
@@ -72,14 +80,14 @@ class Bond:
             coupon_usd = outstanding * self._get_coupon_rate(pmt_date) / self.frequency
 
             if pmt_date > self.settlement_date:
-                years = (pmt_date - self.settlement_date).days / 365.25
+                years = self._year_fraction(self.settlement_date, pmt_date)
                 rows.append({
-                    "date": pmt_date,
-                    "years": years,
-                    "coupon": coupon_usd,
-                    "amortization": amort_usd,
-                    "total_cf": coupon_usd + amort_usd,
-                    "outstanding": outstanding,
+                    "date":           pmt_date,
+                    "years":          years,
+                    "coupon":         coupon_usd,
+                    "amortization":   amort_usd,
+                    "total_cf":       coupon_usd + amort_usd,
+                    "outstanding":    outstanding,
                 })
 
             outstanding = max(outstanding - amort_usd, 0.0)
@@ -89,6 +97,54 @@ class Bond:
 
         self._cash_flows = pd.DataFrame(rows)
         return self._cash_flows
+
+    def _year_fraction(self, d1: date, d2: date) -> float:
+        """Fracción de año entre dos fechas según la convención day_count del bono."""
+        if self.day_count == "30/360":
+            return self._days_30_360(d1, d2) / 360.0
+        else:  # Actual/Actual
+            return (d2 - d1).days / 365.25
+
+    @staticmethod
+    def _days_30_360(d1: date, d2: date) -> int:
+        """Días entre dos fechas bajo convención 30/360 (ISDA)."""
+        d1d = min(d1.day, 30)
+        d2d = min(d2.day, 30) if d1d == 30 else d2.day
+        return 360 * (d2.year - d1.year) + 30 * (d2.month - d1.month) + (d2d - d1d)
+
+    def accrued_interest(self) -> float:
+        """
+        Interés corrido (AI) al settlement_date.
+        Precio_limpio = Precio_sucio − accrued_interest().
+        """
+        all_dates = sorted(self.amortization_schedule["date"].tolist())
+        past   = [d for d in all_dates if d <= self.settlement_date]
+        future = [d for d in all_dates if d >  self.settlement_date]
+
+        if not past or not future:
+            return 0.0
+
+        last_coupon = past[-1]
+        next_coupon = future[0]
+        coupon_rate = self._get_coupon_rate(next_coupon)
+
+        # Outstanding justo después de la amortización del último cupón pagado
+        outstanding = self.face_value
+        for _, row in self.amortization_schedule.iterrows():
+            if row["date"] <= last_coupon:
+                outstanding = max(outstanding - float(row["amort_pct"]) * self.face_value, 0.0)
+
+        if self.day_count == "30/360":
+            days_accrued = self._days_30_360(last_coupon, self.settlement_date)
+            days_period  = self._days_30_360(last_coupon, next_coupon)
+        else:  # Actual/Actual
+            days_accrued = (self.settlement_date - last_coupon).days
+            days_period  = (next_coupon - last_coupon).days
+
+        if days_period == 0:
+            return 0.0
+
+        return outstanding * coupon_rate * days_accrued / days_period / self.frequency
 
     @property
     def cash_flows(self) -> pd.DataFrame:
@@ -111,4 +167,4 @@ class Bond:
             n, mat = len(cf), cf["date"].max()
         except Exception:
             n, mat = "?", "?"
-        return f"Bond('{self.ticker}', maturity={mat}, flows={n})"
+        return f"Bond('{self.ticker}', maturity={mat}, flows={n}, day_count={self.day_count})"
