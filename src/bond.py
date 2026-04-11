@@ -1,22 +1,38 @@
 from __future__ import annotations
 
+import calendar
 import warnings
 from datetime import date
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple, Union
 
 import pandas as pd
 
 
 class Bond:
     """
-    Bono con soporte para sinking fund, step-up coupon, day count e indexación CER.
+    Bono de renta fija con soporte para sinking fund, step-up coupon,
+    day count e indexación CER/DL.
 
-    Convenciones:
+    Parámetros
+    ----------
+    ticker          : identificador del bono
+    face_value      : valor nominal (típicamente 100)
+    settlement_date : fecha de liquidación / valuación
+    maturity_date   : fecha de vencimiento
+    coupon          : tasa anual fija (float) o step-up como lista [(end_date, rate), ...]
+    frequency       : pagos por año (2 = semestral, 4 = trimestral)
+    amort           : None → bullet al vencimiento
+                      list[(date, pct)] → sinking fund; pct relativo al face_value
+    currency        : "USD" | "ARS_CER" | "ARS_DL" | "ARS_UVA"
+    day_count       : "30/360" (USD/DL nominales) | "Actual/Actual" (CER/UVA)
+    base_cer        : índice CER de emisión (para ajuste nominal, opcional)
+
+    Convenciones
+    ------------
     - El cupón se calcula sobre el outstanding ANTES de la amortización del período.
-    - day_count: "30/360" (USD Globales, ONs USD/DL) | "Actual/Actual" (CER/UVA).
-    - base_cer: índice CER de emisión (para indexar flujos reales a nominales, opcional).
-    - Precios de mercado en Argentina son DIRTY (sucio). accrued_interest() devuelve el AI
-      para obtener el precio limpio: precio_limpio = precio_sucio - accrued_interest().
+    - Precios en Argentina son dirty. accrued_interest() devuelve el interés corrido.
+    - Las fechas de pago se auto-generan hacia atrás desde maturity_date con el
+      paso de 12//frequency meses.
     """
 
     def __init__(
@@ -24,37 +40,87 @@ class Bond:
         ticker: str,
         face_value: float,
         settlement_date: date,
-        amortization_schedule: pd.DataFrame,
-        coupon_schedule: pd.DataFrame,
+        maturity_date: date,
+        coupon: Union[float, List[Tuple[date, float]]],
         frequency: int = 2,
+        amort: Optional[List[Tuple[date, float]]] = None,
         currency: str = "USD",
         day_count: str = "30/360",
         base_cer: float = 1.0,
     ) -> None:
-        self.ticker = ticker
-        self.face_value = float(face_value)
+        self.ticker          = ticker
+        self.face_value      = float(face_value)
         self.settlement_date = settlement_date
-        self.frequency = frequency
-        self.currency = currency
-        self.day_count = day_count
-        self.base_cer = base_cer
+        self.maturity_date   = maturity_date
+        self.frequency       = frequency
+        self.currency        = currency
+        self.day_count       = day_count
+        self.base_cer        = base_cer
 
-        self.amortization_schedule = self._parse_amort(amortization_schedule)
-        self.coupon_schedule = self._parse_coupon(coupon_schedule)
+        payment_dates = self._generate_payment_dates()
+        self.amortization_schedule = self._build_amort_df(payment_dates, amort)
+        self.coupon_schedule       = self._build_coupon_df(coupon)
         self._cash_flows: Optional[pd.DataFrame] = None
 
-    @staticmethod
-    def _parse_amort(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
+    # ── Schedule builders ────────────────────────────────────────────────────
+
+    def _generate_payment_dates(self) -> list:
+        """
+        Genera fechas de pago retrocediendo desde maturity_date en pasos de
+        12//frequency meses. El día se preserva, capado al último día del mes.
+        Cubre hasta el año 2000 (suficiente para todos los instrumentos en uso).
+        """
+        step = 12 // self.frequency
+        dates = []
+        y, m, d = self.maturity_date.year, self.maturity_date.month, self.maturity_date.day
+        while y >= 2000:
+            last = calendar.monthrange(y, m)[1]
+            dates.append(date(y, m, min(d, last)))
+            m -= step
+            while m <= 0:
+                m += 12
+                y -= 1
+        return sorted(dates)
+
+    def _build_amort_df(self, payment_dates: list, amort) -> pd.DataFrame:
+        """
+        Combina fechas de pago regulares con el schedule de amortización.
+        amort=None → bullet 100% en maturity_date.
+        amort=[(date, pct), ...] → sinking fund.
+        """
+        if amort is None:
+            amort_map = {self.maturity_date: 1.0}
+        else:
+            amort_map = dict(amort)
+
+        all_dates = sorted(set(payment_dates) | set(amort_map.keys()))
+        rows = [{"date": d, "amort_pct": amort_map.get(d, 0.0)} for d in all_dates]
+        df = pd.DataFrame(rows)
         df["date"] = pd.to_datetime(df["date"]).dt.date
         return df.sort_values("date").reset_index(drop=True)
 
-    @staticmethod
-    def _parse_coupon(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
+    def _build_coupon_df(self, coupon) -> pd.DataFrame:
+        """
+        coupon: float → tasa fija para toda la vida del bono.
+        coupon: [(end_date, rate), ...] → step-up; cada entrada cubre desde el
+                final del segmento anterior hasta end_date.
+        """
+        if isinstance(coupon, (int, float)):
+            rows = [{"start_date": date(1900, 1, 1),
+                     "end_date":   self.maturity_date,
+                     "rate":       float(coupon)}]
+        else:
+            rows = []
+            prev = date(1900, 1, 1)
+            for end_dt, rate in sorted(coupon):
+                rows.append({"start_date": prev, "end_date": end_dt, "rate": float(rate)})
+                prev = end_dt
+        df = pd.DataFrame(rows)
         df["start_date"] = pd.to_datetime(df["start_date"]).dt.date
-        df["end_date"] = pd.to_datetime(df["end_date"]).dt.date
+        df["end_date"]   = pd.to_datetime(df["end_date"]).dt.date
         return df.sort_values("start_date").reset_index(drop=True)
+
+    # ── Coupon rate lookup ────────────────────────────────────────────────────
 
     def _get_coupon_rate(self, payment_date: date) -> float:
         for _, row in self.coupon_schedule.iterrows():
@@ -66,6 +132,8 @@ class Bond:
         )
         return 0.0
 
+    # ── Cash flow generation ──────────────────────────────────────────────────
+
     def generate_cash_flow_schedule(self) -> pd.DataFrame:
         """
         Recorre todo el schedule (incluyendo fechas pasadas) para acumular
@@ -76,18 +144,18 @@ class Bond:
 
         for _, amort_row in self.amortization_schedule.iterrows():
             pmt_date: date = amort_row["date"]
-            amort_usd = float(amort_row["amort_pct"]) * self.face_value
+            amort_usd  = float(amort_row["amort_pct"]) * self.face_value
             coupon_usd = outstanding * self._get_coupon_rate(pmt_date) / self.frequency
 
             if pmt_date > self.settlement_date:
                 years = self._year_fraction(self.settlement_date, pmt_date)
                 rows.append({
-                    "date":           pmt_date,
-                    "years":          years,
-                    "coupon":         coupon_usd,
-                    "amortization":   amort_usd,
-                    "total_cf":       coupon_usd + amort_usd,
-                    "outstanding":    outstanding,
+                    "date":         pmt_date,
+                    "years":        years,
+                    "coupon":       coupon_usd,
+                    "amortization": amort_usd,
+                    "total_cf":     coupon_usd + amort_usd,
+                    "outstanding":  outstanding,
                 })
 
             outstanding = max(outstanding - amort_usd, 0.0)
@@ -98,8 +166,9 @@ class Bond:
         self._cash_flows = pd.DataFrame(rows)
         return self._cash_flows
 
+    # ── Day count ─────────────────────────────────────────────────────────────
+
     def _year_fraction(self, d1: date, d2: date) -> float:
-        """Fracción de año entre dos fechas según la convención day_count del bono."""
         if self.day_count == "30/360":
             return self._days_30_360(d1, d2) / 360.0
         else:  # Actual/Actual
@@ -111,6 +180,8 @@ class Bond:
         d1d = min(d1.day, 30)
         d2d = min(d2.day, 30) if d1d == 30 else d2.day
         return 360 * (d2.year - d1.year) + 30 * (d2.month - d1.month) + (d2d - d1d)
+
+    # ── Accrued interest ──────────────────────────────────────────────────────
 
     def accrued_interest(self) -> float:
         """
@@ -128,7 +199,6 @@ class Bond:
         next_coupon = future[0]
         coupon_rate = self._get_coupon_rate(next_coupon)
 
-        # Outstanding justo después de la amortización del último cupón pagado
         outstanding = self.face_value
         for _, row in self.amortization_schedule.iterrows():
             if row["date"] <= last_coupon:
@@ -137,7 +207,7 @@ class Bond:
         if self.day_count == "30/360":
             days_accrued = self._days_30_360(last_coupon, self.settlement_date)
             days_period  = self._days_30_360(last_coupon, next_coupon)
-        else:  # Actual/Actual
+        else:
             days_accrued = (self.settlement_date - last_coupon).days
             days_period  = (next_coupon - last_coupon).days
 
@@ -145,6 +215,8 @@ class Bond:
             return 0.0
 
         return outstanding * coupon_rate * days_accrued / days_period / self.frequency
+
+    # ── Properties ───────────────────────────────────────────────────────────
 
     @property
     def cash_flows(self) -> pd.DataFrame:

@@ -1,51 +1,44 @@
 """Helpers compartidos entre los módulos de data_loader."""
 
+import calendar
 from datetime import date
 
 SETTLEMENT_DATE = date(2026, 4, 10)
 
 
-def _semiannual_dates(start_year: int, start_month: int, end_year: int, end_month: int) -> list:
-    """Fechas de pago semi-anuales (día 9) entre dos fechas."""
-    dates = []
-    year, month = start_year, start_month
-    while (year, month) <= (end_year, end_month):
-        dates.append(date(year, month, 9))
-        month += 6
-        if month > 12:
-            month -= 12
-            year += 1
-    return dates
+def sinking(
+    start_year: int,
+    start_month: int,
+    end_year: int,
+    end_month: int,
+    pct: float,
+    day: int = 9,
+    frequency: int = 2,
+) -> list:
+    """
+    Genera una lista de (date, pct) para un sinking fund regular.
 
+    Parámetros
+    ----------
+    start_year/month : primer pago de amortización
+    end_year/month   : último pago de amortización
+    pct              : fracción del face_value a amortizar en cada cuota
+    day              : día del mes de los pagos (31 → usa el último día del mes)
+    frequency        : pagos por año (2=semestral, 4=trimestral)
 
-def _may_nov_dates(start_year: int, end_year: int) -> list:
-    """Fechas semianuales el día 9 de mayo y noviembre."""
-    dates = []
-    for y in range(start_year, end_year + 1):
-        dates.append(date(y, 5, 9))
-        dates.append(date(y, 11, 9))
-    return sorted(dates)
-
-
-def _jun_dec_dates(start_year: int, end_year: int) -> list:
-    """Fechas semianuales el 30 de junio y 31 de diciembre."""
-    dates = []
-    for y in range(start_year, end_year + 1):
-        dates.append(date(y, 6, 30))
-        dates.append(date(y, 12, 31))
-    return sorted(dates)
-
-
-def _quarterly_dates(start_year: int, start_month: int, end_year: int, end_month: int) -> list:
-    """Fechas de pago trimestrales (último día hábil del mes, aproximado al 30)."""
-    import calendar
-    dates = []
-    year, month = start_year, start_month
-    while (year, month) <= (end_year, end_month):
-        last_day = min(30, calendar.monthrange(year, month)[1])
-        dates.append(date(year, month, last_day))
-        month += 3
-        if month > 12:
-            month -= 12
-            year += 1
-    return dates
+    Ejemplo
+    -------
+    sinking(2025, 1, 2029, 7, 0.10)         → 10 cuotas semestrales de 10%
+    sinking(2024, 6, 2033, 12, 0.05, day=31) → 20 cuotas semestrales EOM (Jun-30/Dic-31)
+    """
+    step = 12 // frequency
+    result = []
+    y, m = start_year, start_month
+    while (y, m) <= (end_year, end_month):
+        last = calendar.monthrange(y, m)[1]
+        result.append((date(y, m, min(day, last)), pct))
+        m += step
+        if m > 12:
+            m -= 12
+            y += 1
+    return result
