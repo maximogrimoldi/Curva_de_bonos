@@ -2,7 +2,9 @@ import argparse
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Callable, Dict, List
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -10,7 +12,6 @@ from src import NSSCurve, SpreadEngine, Visualizer, data_loader
 from src.bond import Bond
 
 # ── Parámetro principal ───────────────────────────────────────────────────────
-# Opciones: "USD" | "CER" | "DL"
 CURVE = "USD"
 
 # ── Configuración general ─────────────────────────────────────────────────────
@@ -51,7 +52,6 @@ MARKET_PRICES_DL = {
 }
 
 # ── Registro de curvas ────────────────────────────────────────────────────────
-# Cada entrada: (bonds_loader, market_prices, ons_loader, viz_title, save_prefix)
 CURVE_REGISTRY = {
     "USD": (
         data_loader.load_globales,
@@ -76,9 +76,106 @@ CURVE_REGISTRY = {
     ),
 }
 
+_CURVE_LABELS = {
+    "USD": "GLOBALES USD",
+    "CER": "CER (TASA REAL ARS)",
+    "DL":  "DOLLAR LINKED",
+}
+
+
+def print_stats_table(
+    nss: NSSCurve,
+    bonds: List[Bond],
+    on_results: List[Dict],
+    curve_key: str,
+    settlement: date,
+    fit_metrics: Dict,
+) -> None:
+    sep = "=" * 66
+    label = _CURVE_LABELS.get(curve_key, curve_key)
+    date_str = settlement.strftime("%d/%m/%Y")
+
+    print(f"\n{sep}")
+    print(f"  CURVA SPOT NSS — {label} — {date_str}")
+    print(sep)
+
+    # Bonos usados con su vencimiento
+    bond_strs = "  ".join(
+        f"{b.ticker} ({b.maturity_years:.1f}y)" for b in bonds
+    )
+    print(f"\n  BONOS UTILIZADOS: {bond_strs}")
+
+    # ── Tabla de parámetros ───────────────────────────────────────────
+    param_names  = NSSCurve.PARAM_NAMES
+    param_interp = [
+        "Tasa largo plazo",
+        "Pendiente (corto−largo)",
+        "Curvatura tramo medio",
+        "Curvatura tramo largo",
+        "Hump 1 aparece en",
+        "Hump 2 aparece en",
+    ]
+
+    print(f"\n  PARÁMETROS ESTIMADOS:")
+    print(
+        f"  ┌{'─'*10}┬{'─'*10}┬{'─'*12}┬{'─'*11}┬{'─'*16}┬{'─'*36}┐"
+    )
+    print(
+        f"  │ {'Param':<8} │ {'Valor':>8} │ {'Std Error':>10} │ {'t-stat':>9} │ {'IC 95%':>14} │ {'Interpretación':<34} │"
+    )
+    print(
+        f"  ├{'─'*10}┼{'─'*10}┼{'─'*12}┼{'─'*11}┼{'─'*16}┼{'─'*36}┤"
+    )
+
+    for i, name in enumerate(param_names):
+        val  = nss.params[i]
+        se   = nss.std_errors[i]
+        tstat = nss.t_stats[i]
+        lo   = nss.ic_low[i]
+        hi   = nss.ic_high[i]
+
+        val_str   = f"{val:.4f}"
+        se_str    = f"{se:.4f}"   if np.isfinite(se)    else "N/A"
+        ts_str    = f"{tstat:.1f}" if np.isfinite(tstat) else "N/A"
+
+        if np.isfinite(lo) and np.isfinite(hi):
+            ic_str = f"[{lo:.3f},{hi:.3f}]"
+        else:
+            ic_str = "N/A"
+
+        if "τ" in name:
+            interp_str = f"{param_interp[i]}: {val:.2f} años"
+        else:
+            interp_str = f"{param_interp[i]}: {val*100:+.2f}%"
+
+        print(
+            f"  │ {name:<8} │ {val_str:>8} │ {se_str:>10} │ {ts_str:>9} │ {ic_str:>14} │ {interp_str:<34} │"
+        )
+
+    print(
+        f"  └{'─'*10}┴{'─'*10}┴{'─'*12}┴{'─'*11}┴{'─'*16}┴{'─'*36}┘"
+    )
+
+    # ── Métricas de ajuste ────────────────────────────────────────────
+    r2   = fit_metrics["r2"]
+    rmse = fit_metrics["rmse_price"]
+    mae  = fit_metrics["mae_pct"]
+    n    = len(bonds)
+    print(f"\n  MÉTRICAS DE AJUSTE:")
+    print(f"  RMSE precio: ${rmse:.4f}  |  MAE%: {mae:.3f}%  |  R²: {r2:.6f}  |  Bonos: {n}")
+
+    # ── Z-Spreads ─────────────────────────────────────────────────────
+    valid_ons = [r for r in on_results if np.isfinite(r.get("z_spread_bps", float("nan")))]
+    if valid_ons:
+        print(f"\n  Z-SPREADS ONs:")
+        for r in valid_ons:
+            print(f"  {r['ticker']:<8}  {r['z_spread_bps']:+.0f} bps")
+
+    print(f"\n{sep}")
+
 
 def _run_curve_section(
-    section_name: str,
+    curve_key: str,
     bonds_dict: Dict[str, Bond],
     market_prices: Dict[str, float],
     ons_loader: Callable,
@@ -87,40 +184,23 @@ def _run_curve_section(
     save_prefix: str,
     save_charts: bool,
 ) -> None:
-    print(f"\n{'='*65}")
-    print(f"  {section_name}")
-    print(f"  Settlement: {settlement.strftime('%d/%m/%Y')} | Bonos: {list(market_prices.keys())}")
-    print(f"{'='*65}")
-
     # 1. Generar flujos
     bonds, prices = [], []
     for ticker, price in market_prices.items():
         if ticker not in bonds_dict:
-            print(f"  WARN: {ticker} no encontrado. Omitiendo.")
             continue
         bond = bonds_dict[ticker]
         bond.generate_cash_flow_schedule()
         bonds.append(bond)
         prices.append(price)
 
-    # 2. Calibrar curva NSS
+    # 2. Calibrar curva NSS (silencioso)
     nss = NSSCurve()
-    nss.fit(bonds=bonds, market_prices=prices, n_restarts=N_RESTARTS, verbose=True)
+    fit_metrics = nss.fit(bonds=bonds, market_prices=prices, n_restarts=N_RESTARTS)
 
-    # 3. Tabla spot / forward en nodos clave
-    print(f"\n  Curva Spot NSS — {section_name}:")
-    nodos = [0.5, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30]
-    print(f"  {'t(años)':>8} {'Spot (%)':>10} {'Forward 1Y (%)':>15}")
-    print("  " + "-" * 36)
-    for t in nodos:
-        s = nss.get_spot_rate(t) * 100
-        f = nss.get_forward_rate(t, dt=1.0) * 100
-        print(f"  {t:>8.1f} {s:>10.4f} {f:>15.4f}")
-
-    # 4. Z-Spreads de ONs
-    print(f"\n  Z-Spreads de ONs — {section_name}:")
-    engine = SpreadEngine(nss)
-    ons_data  = ons_loader(settlement=settlement)
+    # 3. Z-Spreads de ONs
+    engine   = SpreadEngine(nss)
+    ons_data = ons_loader(settlement=settlement)
     on_bonds  = [v[0] for v in ons_data.values()]
     on_prices = [v[1] for v in ons_data.values()]
 
@@ -128,10 +208,7 @@ def _run_curve_section(
     for bond, price in zip(on_bonds, on_prices):
         on_results.append(engine.z_spread(bond, price))
 
-    df_spreads = engine.spread_table(on_bonds, on_prices)
-    print(df_spreads.to_string(index=False))
-
-    # 5. Dashboard
+    # 4. Gráfico (2 paneles)
     viz = Visualizer(style=CHART_STYLE)
     save_path = f"{save_prefix}.png" if save_charts else None
     viz.plot_dashboard(
@@ -139,6 +216,16 @@ def _run_curve_section(
         on_results=on_results,
         title=viz_title,
         save_path=save_path,
+    )
+
+    # 5. Tabla estadística
+    print_stats_table(
+        nss=nss,
+        bonds=bonds,
+        on_results=on_results,
+        curve_key=curve_key,
+        settlement=settlement,
+        fit_metrics=fit_metrics,
     )
 
 
@@ -156,7 +243,7 @@ def main(curve: str = "ALL", save_charts: bool = False) -> None:
     for key in curves_to_run:
         bonds_loader, market_prices, ons_loader, viz_title, save_prefix = CURVE_REGISTRY[key]
         _run_curve_section(
-            section_name=f"CURVA SOBERANA — {key}",
+            curve_key=key,
             bonds_dict=bonds_loader(settlement=SETTLEMENT_DATE),
             market_prices=market_prices,
             ons_loader=ons_loader,

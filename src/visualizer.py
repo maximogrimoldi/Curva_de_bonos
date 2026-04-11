@@ -71,10 +71,10 @@ class Visualizer:
     ) -> plt.Figure:
         curve_df = nss_curve.curve_dataframe(t_max=20.0, n_points=600)
 
-        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(16, 6), facecolor=self.pal["bg"])
+        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(14, 5), facecolor=self.pal["bg"])
         fig.suptitle(title, fontsize=14, fontweight="bold", color=self.pal["fg"], y=1.01)
 
-        # Panel izquierdo: curva spot + forward
+        # ── Panel izquierdo: Curva Spot + Forward ─────────────────────
         ax0.plot(curve_df["years"], curve_df["spot_rate_pct"],
                  color=self.pal["curve"], linewidth=2.5, label="Curva Spot NSS")
         ax0.plot(curve_df["years"], curve_df["forward_1y_pct"],
@@ -84,7 +84,8 @@ class Visualizer:
         b = nss_curve.params
         ax0.text(
             0.02, 0.04,
-            f"β₀={b[0]*100:.2f}%  β₁={b[1]*100:.2f}%  β₂={b[2]*100:.2f}%  β₃={b[3]*100:.2f}%  τ₁={b[4]:.2f}  τ₂={b[5]:.2f}",
+            f"β₀={b[0]*100:.2f}%  β₁={b[1]*100:.2f}%  β₂={b[2]*100:.2f}%  "
+            f"β₃={b[3]*100:.2f}%  τ₁={b[4]:.2f}  τ₂={b[5]:.2f}",
             transform=ax0.transAxes, fontsize=7.5, color=self.pal["zero_line"], style="italic",
         )
         ax0.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f%%"))
@@ -98,7 +99,7 @@ class Visualizer:
         ax0.grid(True, which="major", alpha=0.7, linewidth=0.8)
         ax0.grid(True, which="minor", alpha=0.3, linewidth=0.4)
 
-        # Panel derecho: Z-Spreads
+        # ── Panel derecho: Z-Spreads ──────────────────────────────────
         ax1.set_title("Z-Spread vs. Curva Soberana")
         if not on_results:
             ax1.text(0.5, 0.5, "Sin ONs cargadas", ha="center", va="center",
