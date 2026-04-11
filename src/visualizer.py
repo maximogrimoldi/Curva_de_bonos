@@ -69,7 +69,7 @@ class Visualizer:
         title: str = "Curva Soberana Argentina · Globales USD",
         save_path: Optional[str] = None,
     ) -> plt.Figure:
-        curve_df = nss_curve.curve_dataframe(t_max=28.0, n_points=600)
+        curve_df = nss_curve.curve_dataframe(t_max=20.0, n_points=600)
 
         fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(16, 6), facecolor=self.pal["bg"])
         fig.suptitle(title, fontsize=14, fontweight="bold", color=self.pal["fg"], y=1.01)
@@ -88,12 +88,15 @@ class Visualizer:
             transform=ax0.transAxes, fontsize=7.5, color=self.pal["zero_line"], style="italic",
         )
         ax0.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f%%"))
+        ax0.xaxis.set_major_locator(mticker.MultipleLocator(1))
+        ax0.xaxis.set_minor_locator(mticker.MultipleLocator(0.5))
         ax0.set_xlabel("Plazo (años)")
         ax0.set_ylabel("Tasa (%)")
         ax0.set_title("Curva Spot NSS")
         ax0.set_xlim(left=0)
         ax0.legend(fontsize=9)
-        ax0.grid(True, alpha=0.4)
+        ax0.grid(True, which="major", alpha=0.7, linewidth=0.8)
+        ax0.grid(True, which="minor", alpha=0.3, linewidth=0.4)
 
         # Panel derecho: Z-Spreads
         ax1.set_title("Z-Spread vs. Curva Soberana")

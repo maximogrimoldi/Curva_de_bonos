@@ -142,25 +142,29 @@ def _run_curve_section(
     )
 
 
-def main(curve: str = CURVE, save_charts: bool = False) -> None:
+def main(curve: str = "ALL", save_charts: bool = False) -> None:
     import matplotlib.pyplot as plt
 
     curve = curve.upper()
-    if curve not in CURVE_REGISTRY:
-        raise ValueError(f"CURVE inválido: '{curve}'. Opciones: {list(CURVE_REGISTRY.keys())}")
+    if curve == "ALL":
+        curves_to_run = list(CURVE_REGISTRY.keys())
+    elif curve in CURVE_REGISTRY:
+        curves_to_run = [curve]
+    else:
+        raise ValueError(f"CURVE inválido: '{curve}'. Opciones: {list(CURVE_REGISTRY.keys())} | ALL")
 
-    bonds_loader, market_prices, ons_loader, viz_title, save_prefix = CURVE_REGISTRY[curve]
-
-    _run_curve_section(
-        section_name=f"CURVA SOBERANA — {curve}",
-        bonds_dict=bonds_loader(settlement=SETTLEMENT_DATE),
-        market_prices=market_prices,
-        ons_loader=ons_loader,
-        settlement=SETTLEMENT_DATE,
-        viz_title=viz_title,
-        save_prefix=save_prefix,
-        save_charts=save_charts,
-    )
+    for key in curves_to_run:
+        bonds_loader, market_prices, ons_loader, viz_title, save_prefix = CURVE_REGISTRY[key]
+        _run_curve_section(
+            section_name=f"CURVA SOBERANA — {key}",
+            bonds_dict=bonds_loader(settlement=SETTLEMENT_DATE),
+            market_prices=market_prices,
+            ons_loader=ons_loader,
+            settlement=SETTLEMENT_DATE,
+            viz_title=viz_title,
+            save_prefix=save_prefix,
+            save_charts=save_charts,
+        )
 
     plt.show()
 
@@ -168,8 +172,8 @@ def main(curve: str = CURVE, save_charts: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--curve", default=CURVE, choices=["USD", "CER", "DL"],
-        help="Tipo de curva a correr: USD | CER | DL  (default: %(default)s)",
+        "--curve", default="ALL", choices=["USD", "CER", "DL", "ALL"],
+        help="Tipo de curva a correr: USD | CER | DL | ALL  (default: %(default)s)",
     )
     parser.add_argument("--save", action="store_true", help="Guardar gráfico como PNG.")
     args = parser.parse_args()
