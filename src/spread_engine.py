@@ -11,11 +11,11 @@ from .nss_curve import NSSCurve
 
 
 class SpreadEngine:
-    """Calcula Z-Spread de ONs respecto a la curva soberana NSS."""
+    """Calcula Z-Spread de ONs respecto a la curva soberana NS."""
 
     def __init__(self, curve: NSSCurve) -> None:
         if curve.params is None:
-            raise ValueError("La curva NSS no está calibrada. Ejecutar NSSCurve.fit() primero.")
+            raise ValueError("La curva NS no está calibrada. Ejecutar NSSCurve.fit() primero.")
         self.curve = curve
 
     def _price_with_spread(self, bond: Bond, z: float) -> float:

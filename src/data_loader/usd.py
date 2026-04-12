@@ -72,8 +72,8 @@ def load_globales(settlement: date = SETTLEMENT_DATE) -> Dict[str, Bond]:
 
 
 EXAMPLE_MARKET_PRICES: Dict[str, float] = {
-    "GD29": 57.73, "GD30": 59.27, "GD35": 74.20,
-    "GD38": 76.05, "GD41": 73.62, "GD46": 72.66,
+    "GD29": 65.49, "GD30": 64.64, "GD35": 79.90,
+    "GD38": 83.10, "GD41": 74.17, "GD46": 70.99,
 }
 
 
@@ -82,20 +82,20 @@ EXAMPLE_MARKET_PRICES: Dict[str, float] = {
 def load_sample_ons(settlement: date = SETTLEMENT_DATE) -> Dict[str, Tuple[Bond, float]]:
     """
     ONs corporativas USD:
-    - YMCQO  (YPF 9.00%, trimestral, 16 × 6.25% desde Sep-2025, vto Sep-2029)
-    - TEC3O  (Telecom 8.50%, semestral, 5 × 20% desde Jun-2029, vto Jun-2031)
+    - YMCQOD  (YPF 9.00%, trimestral, 16 × 6.25% desde Sep-2025, vto Sep-2029)
+    - TLC10D  (Telecom 8.50%, semestral, 5 × 20% desde Jun-2029, vto Jun-2031)
     """
-    ymcqo = Bond("YMCQO", 100.0, settlement, date(2029, 9, 30),
-                 coupon=0.0900, frequency=4,
-                 amort=sinking(2025, 9, 2029, 6, round(1/16, 10), day=30, frequency=4),
-                 day_count="30/360")
+    ymcqod = Bond("YMCQOD", 100.0, settlement, date(2029, 9, 30),
+                  coupon=0.0900, frequency=4,
+                  amort=sinking(2025, 9, 2029, 6, round(1/16, 10), day=30, frequency=4),
+                  day_count="30/360")
 
-    tec3o = Bond("TEC3O", 100.0, settlement, date(2031, 6, 16),
-                 coupon=0.0850,
-                 amort=sinking(2029, 6, 2031, 6, 0.20, day=16),
-                 day_count="30/360")
+    tlc10d = Bond("TLC10D", 100.0, settlement, date(2031, 6, 16),
+                  coupon=0.0850,
+                  amort=sinking(2029, 6, 2031, 6, 0.20, day=16),
+                  day_count="30/360")
 
     return {
-        "YMCQO": (ymcqo, 86.00),
-        "TEC3O": (tec3o, 78.00),
+        "YMCQOD": (ymcqod, 102.00),
+        "TLC10D": (tlc10d, 103.30),
     }
