@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 main.py --curve USD)",
+      "Bash(python3 main.py --curve CER)",
+      "Bash(python3 main.py --curve DL)"
+    ]
+  }
+}
